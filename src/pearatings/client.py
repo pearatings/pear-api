@@ -20,8 +20,8 @@ from .errors import (APIError, AuthenticationError, InvalidRequestError, NotFoun
 
 DEFAULT_BASE_URL = "https://api.pearatings.com"
 DIVISIONS = {"baseball": ("d1", "d2", "d3", "naia"), "softball": ("d1", "d2", "d3")}
-_ERRORS = {400: InvalidRequestError, 401: AuthenticationError, 404: NotFoundError, 422: InvalidRequestError,
-           429: RateLimitError}
+_ERRORS = {400: InvalidRequestError, 401: AuthenticationError, 403: AuthenticationError, 404: NotFoundError,
+           422: InvalidRequestError, 429: RateLimitError}
 _PAGE = 200  # the API's largest page for the player leaderboard and Lookup
 
 Date = Union[str, _dt.date]
@@ -98,6 +98,10 @@ class Pear:
                 detail = r.json().get("detail", r.text)
             except ValueError:
                 detail = r.text or r.reason
+            if r.status_code == 429:
+                after = r.headers.get("Retry-After")
+                raise RateLimitError(f"429: {detail}", status_code=429,
+                                     retry_after=int(after) if after and after.isdigit() else None)
             raise _ERRORS.get(r.status_code, APIError)(f"{r.status_code}: {detail}", status_code=r.status_code)
         return r
 
@@ -122,6 +126,22 @@ class Pear:
         if path not in allowed:
             raise ValueError(f"Only available for {', '.join(allowed)}")
         return path
+
+    # ------------------------------------------------------------------ your account
+
+    def account(self) -> dict:
+        """Your key's tier, its limits (calls per month and per minute), calls used this month (UTC; resets on the
+        1st) and subscription status."""
+        return self.get("account")
+
+    def billing_portal(self, open_browser: bool = True) -> str:
+        """A one-time link to Stripe's customer portal (change tier, cancel, change card, download invoices). Opens it
+        in your browser unless open_browser=False; returns the link either way. Paid tiers only."""
+        url = self.post("account/portal")["url"]
+        if open_browser:
+            import webbrowser
+            webbrowser.open(url)
+        return url
 
     # ------------------------------------------------------------------ teams and ratings
 

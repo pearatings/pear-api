@@ -9,7 +9,7 @@ from pearatings import AuthenticationError, NotFoundError, Pear, RateLimitError
 
 class FakeResponse:
     def __init__(self, status=200, body=None, content=b""):
-        self.status_code, self._body, self.content = status, body, content
+        self.status_code, self._body, self.content, self.headers = status, body, content, {}
         self.text, self.reason = json.dumps(body), "reason"
 
     def json(self):
@@ -93,7 +93,8 @@ def test_records_one_row_per_team():
     assert df.columns[0] == "Team" and df.set_index("Team").loc["UNO", "losses"] == 4
 
 
-@pytest.mark.parametrize("status,error", [(401, AuthenticationError), (404, NotFoundError), (429, RateLimitError)])
+@pytest.mark.parametrize("status,error", [(401, AuthenticationError), (403, AuthenticationError), (404, NotFoundError),
+                                          (429, RateLimitError)])
 def test_http_errors(status, error):
     with pytest.raises(error) as e:
         client(FakeResponse(status=status, body={"detail": "nope"})).ratings()
@@ -111,3 +112,17 @@ def test_bad_division_fails_before_any_request():
 
 def test_logo_returns_bytes():
     assert client(FakeResponse(content=b"\x89PNG")).logo("LSU") == b"\x89PNG"
+
+
+def test_rate_limit_carries_retry_after():
+    resp = FakeResponse(status=429, body={"detail": "Rate limit: 60 requests per minute"})
+    resp.headers = {"Retry-After": "17"}
+    with pytest.raises(RateLimitError) as e:
+        client(resp).ratings()
+    assert e.value.retry_after == 17
+
+
+def test_account_and_portal():
+    pear = client(FakeResponse(body={"url": "https://billing.stripe.com/p/session/x"}))
+    assert pear.billing_portal(open_browser=False) == "https://billing.stripe.com/p/session/x"
+    assert pear.session.calls[0]["method"] == "POST" and pear.session.calls[0]["url"].endswith("/v1/account/portal")

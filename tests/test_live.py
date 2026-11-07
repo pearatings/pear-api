@@ -94,3 +94,7 @@ def test_tournaments(pear):
     frame(pear.tournament_history(sport="softball"))
     with pytest.raises(APIError):   # 503 until NAIA's bracket exists
         pear.tournament_outlook(division="naia")
+
+
+def test_account(pear):
+    assert "plan" in pear.account()

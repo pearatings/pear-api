@@ -7,8 +7,23 @@ Tables come back as pandas DataFrames.
 ## Install
 
 ```bash
-pip install git+https://github.com/<github-user>/pear-api.git
+pip install git+https://github.com/pearatings/pear-api.git
 ```
+
+## Get a key
+
+Pick a tier at **https://api.pearatings.com/billing**. Your key is shown once: copy it.
+
+| Tier | Price | API calls per month | Per minute |
+|---|---|---|---|
+| Free | $0 | 500 | 10 |
+| Starter | $1.99/month | 1,000 | 30 |
+| Plus | $4.99/month | 5,000 | 60 |
+| Pro | $9.99/month | 20,000 | 120 |
+| Max | $19.99/month | 50,000 | 120 |
+
+Every request is one call; `players()` fetches a full leaderboard 200 rows per call. Calls reset on the 1st
+(UTC). `pear.account()` shows your tier and calls used this month; `pear.billing_portal()` changes tier or cancels.
 
 ## Set your key
 
@@ -62,6 +77,7 @@ method's details.
 
 | Area | Methods |
 |---|---|
+| Your account | `account`, `billing_portal` |
 | Teams and ratings | `ratings`, `preseason`, `stats`, `teams`, `team`, `team_conferences`, `conferences`, `conference_standings`, `records`, `pcr_ranks`, `combined_ratings`, `logo`, `conference_logo` |
 | Projections | `games`, `matchup`, `team_schedule`, `simulate_wins`, `season_projection`, `conference_projections` |
 | Players | `players`, `roster`, `player` |
@@ -88,9 +104,9 @@ Up to 200 rows per call; `df.attrs["total"]` is the full count, page with `offse
 ## Errors
 
 All errors subclass `pearatings.PearError` and carry `.status_code`:
-`AuthenticationError` (bad or missing key), `NotFoundError` (unknown team / season), `InvalidRequestError`
-(bad parameters), `RateLimitError` (too many requests: wait and retry), `APIError` (anything else, e.g. data
-not available out of season).
+`AuthenticationError` (bad or missing key, or a lapsed subscription), `NotFoundError` (unknown team / season),
+`InvalidRequestError` (bad parameters), `RateLimitError` (over your tier's limit; `.retry_after` says how many
+seconds to wait), `APIError` (anything else, e.g. data not available out of season).
 
 ## Development
 

@@ -10,7 +10,8 @@ class PearError(Exception):
 
 
 class AuthenticationError(PearError):
-    """No API key, or the API rejected it (HTTP 401)."""
+    """No API key, the API doesn't know it (HTTP 401), or it is no longer active: revoked or the subscription
+    lapsed (HTTP 403)."""
 
 
 class NotFoundError(PearError):
@@ -22,7 +23,11 @@ class InvalidRequestError(PearError):
 
 
 class RateLimitError(PearError):
-    """Too many requests in a short time (HTTP 429). Wait a few seconds and retry."""
+    """Over your tier's per-minute or monthly limit (HTTP 429). `retry_after` is the seconds to wait (or None)."""
+
+    def __init__(self, message, status_code=None, retry_after=None):
+        super().__init__(message, status_code)
+        self.retry_after = retry_after
 
 
 class APIError(PearError):
