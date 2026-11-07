@@ -7,7 +7,7 @@ Tables come back as pandas DataFrames.
 ## Install
 
 ```bash
-pip install git+https://github.com/pearatings/pear-api.git
+pip install pearatings
 ```
 
 ## Get a key
