@@ -60,6 +60,37 @@ def _seg(text: str) -> str:
     return quote(str(text), safe="")
 
 
+_GAME_SPORT = {"B": "baseball", "S": "softball"}
+_GAME_PARTS = ("batting", "pitching", "teams", "plays")
+
+
+def _game_path(game_id: str) -> str:
+    """A PEAR game id's sport/division: its prefix is the sport letter and the division number ("B1-2026-08361" =
+    D1 baseball, "S2-..." = D2 softball)."""
+    game_id = str(game_id)
+    sport = _GAME_SPORT.get(game_id[:1])
+    if sport is None or not game_id[1:2].isdigit() or game_id[2:3] != "-":
+        raise ValueError(f"Not a PEAR game id: {game_id!r} (looks like 'B1-2026-08361'; see games() / team_schedule())")
+    return f"{sport}/d{game_id[1]}"
+
+
+def _box_tables(games: List[dict]) -> Dict[str, pd.DataFrame]:
+    """Games from the box score / play-by-play endpoints stacked into tables, each row tagged with its game_id:
+    `games` (one row per game: date, teams, score, ...), and those of `batting`, `pitching`, `teams` (team lines),
+    `plays` that the games carry."""
+    out = {"games": []}
+    for g in games:
+        gid = g["game_id"]
+        out["games"].append({k: v for k, v in g.items() if k not in _GAME_PARTS})
+        for part in _GAME_PARTS:
+            value = g.get(part)
+            if value is None:
+                continue
+            rows = value if isinstance(value, list) else [r for v in value.values() for r in (v if isinstance(v, list) else [v])]
+            out.setdefault(part, []).extend(dict(r, game_id=gid) for r in rows)
+    return {k: _records(v) for k, v in out.items()}
+
+
 class Pear:
     """PEARatings data API client.
 
@@ -145,9 +176,14 @@ class Pear:
 
     # ------------------------------------------------------------------ teams and ratings
 
-    def ratings(self, *, sport: str = "baseball", division: str = "d1") -> pd.DataFrame:
-        """Current Team Strength Ratings (TSR) and PCR for every team. attrs: date."""
-        return _table(self.get(f"{self._div(sport, division)}/ratings"), "teams")
+    def ratings(self, date: Optional[Date] = None, *, sport: str = "baseball", division: str = "d1") -> pd.DataFrame:
+        """Every team's Team Strength Rating (TSR), PCR, RQI, SOS, SOR, WAB, quadrant records, RPI (with its SOS and
+        quadrants), KPI, ELO, killshots and projected record. Current by default; pass a `date` ("2027-04-18" or a
+        date) for the ratings as they stood that day (current season only). attrs: date (of the ratings used)."""
+        if isinstance(date, _dt.date):
+            date = date.isoformat()
+        path = f"{self._div(sport, division)}/ratings" + (f"/{_seg(date)}" if date else "")
+        return _table(self.get(path), "teams")
 
     def preseason(self, season: int, *, sport: str = "baseball", division: str = "d1") -> pd.DataFrame:
         """A season's preseason ratings: the projection the season started from. D1 baseball has them back to
@@ -155,8 +191,9 @@ class Pear:
         return _table(self.get(f"{self._div(sport, division)}/preseason", season=season), "teams")
 
     def stats(self, season: Optional[int] = None, *, sport: str = "baseball", division: str = "d1") -> pd.DataFrame:
-        """Every team's calculated stats and ratings for a season (default: current). For a finished season these
-        are the end-of-season ratings. attrs: date, season, columnMetadata."""
+        """Every team's PEAR numbers for a season (default: current): ratings, resume, killshots, adjusted offense /
+        defense and staff values. For a finished season these are the end-of-season numbers.
+        attrs: date, season, columnMetadata."""
         return _table(self.get(f"{self._div(sport, division)}/stats", season=season), "stats")
 
     def teams(self, season: Optional[int] = None, *, sport: str = "baseball", division: str = "d1") -> List[str]:
@@ -287,6 +324,57 @@ class Pear:
         if sport not in DIVISIONS:
             raise ValueError(f"Unknown sport {sport}")
         return _frames(self.get(f"{sport}/player/{_seg(player_id)}"))
+
+    # ------------------------------------------------------------------ box scores and play-by-play
+
+    def box_score(self, game_id: str) -> dict:
+        """One game's box score by PEAR game id (the `game_id` column of games() / team_schedule()): `game` (date,
+        teams, score, hits, errors, line score, expected runs) and DataFrames `batting`, `pitching` (both teams;
+        `side` says which) and `teams` (team lines). Sport and division come from the id."""
+        return self._game(game_id, "box-score")
+
+    def play_by_play(self, game_id: str) -> pd.DataFrame:
+        """One game's plays, in order: the play, batter, pitcher, base-out state before and after, home win
+        probability after it. attrs: the game (date, teams, score, pregame win probability, Excitement Index)."""
+        data = self.get(f"{_game_path(game_id)}/play-by-play/{_seg(game_id)}")
+        return _table(data, "plays")
+
+    def game(self, game_id: str) -> dict:
+        """One game, everything: box_score() plus `plays` (play_by_play())."""
+        return self._game(game_id, "game")
+
+    def _game(self, game_id: str, endpoint: str) -> dict:
+        tables = _box_tables([self.get(f"{_game_path(game_id)}/{endpoint}/{_seg(game_id)}")])
+        game = tables.pop("games").to_dict("records")[0]
+        return {"game": game, **tables}
+
+    def team_box_scores(self, team: str, season: Optional[int] = None, *, sport: str = "baseball",
+                        division: str = "d1") -> Dict[str, pd.DataFrame]:
+        """Every box score of a team's season (default: current) in one call, stacked into DataFrames tagged with
+        `game_id`: `games` (one row per game), `batting`, `pitching`, `teams` (team lines)."""
+        return self._team_games(team, season, "box-scores", sport, division)
+
+    def team_play_by_play(self, team: str, season: Optional[int] = None, *, sport: str = "baseball",
+                          division: str = "d1") -> pd.DataFrame:
+        """Every play of a team's season (default: current) in one call, one row per play tagged with `game_id`.
+        attrs: team, season, games (one record per game: date, teams, score)."""
+        tables = self._team_games(team, season, "play-by-play", sport, division)
+        plays = tables.get("plays", pd.DataFrame())
+        plays.attrs = {"team": team, "season": tables["games"].attrs.get("season"),
+                       "games": tables["games"].to_dict("records")}
+        return plays
+
+    def team_games(self, team: str, season: Optional[int] = None, *, sport: str = "baseball",
+                   division: str = "d1") -> Dict[str, pd.DataFrame]:
+        """team_box_scores() plus `plays`: every game of a team's season, everything, in one call."""
+        return self._team_games(team, season, "games", sport, division)
+
+    def _team_games(self, team, season, endpoint, sport, division) -> Dict[str, pd.DataFrame]:
+        path = f"{self._div(sport, division)}/team/{_seg(team)}/{endpoint}" + (f"/{int(season)}" if season else "")
+        data = self.get(path)
+        tables = _box_tables(data["games"])
+        tables["games"].attrs = {"team": data["team"], "season": data["season"]}
+        return tables
 
     # ------------------------------------------------------------------ history
 

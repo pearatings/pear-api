@@ -126,3 +126,42 @@ def test_account_and_portal():
     pear = client(FakeResponse(body={"url": "https://billing.stripe.com/p/session/x"}))
     assert pear.billing_portal(open_browser=False) == "https://billing.stripe.com/p/session/x"
     assert pear.session.calls[0]["method"] == "POST" and pear.session.calls[0]["url"].endswith("/v1/account/portal")
+
+
+def test_ratings_on_a_date():
+    import datetime as dt
+    pear = client(FakeResponse(body={"teams": [{"Team": "LSU"}], "date": "April 18, 2027", "count": 1}))
+    pear.ratings("2027-04-18")
+    pear.ratings(dt.date(2027, 4, 18), sport="softball")
+    assert [c["url"] for c in pear.session.calls] == ["http://api.test/v1/baseball/d1/ratings/2027-04-18",
+                                                      "http://api.test/v1/softball/d1/ratings/2027-04-18"]
+
+
+GAME = {"game_id": "S2-2026-00001", "date": "2026-03-01", "home": {"team": "A", "score": 3}, "away": {"team": "B"},
+        "teams": {"away": {"side": "away", "R": 1}, "home": {"side": "home", "R": 3}},
+        "batting": {"away": [{"side": "away", "player": "x"}], "home": [{"side": "home", "player": "y"}]},
+        "pitching": {"away": [{"side": "away"}], "home": []}, "plays": [{"seq": 1}, {"seq": 2}]}
+
+
+def test_box_score_division_comes_from_the_game_id():
+    pear = client(FakeResponse(body=GAME))
+    box = pear.box_score("S2-2026-00001")
+    assert pear.session.calls[0]["url"] == "http://api.test/v1/softball/d2/box-score/S2-2026-00001"
+    assert box["game"]["home.team"] == "A" and len(box["batting"]) == 2 and len(box["teams"]) == 2
+    assert set(box["batting"]["game_id"]) == {"S2-2026-00001"} and len(box["plays"]) == 2
+    with pytest.raises(ValueError):
+        pear.box_score("2026-00001")
+
+
+def test_play_by_play_and_team_season():
+    pear = client(FakeResponse(body={k: v for k, v in GAME.items() if k not in ("batting", "pitching", "teams")}))
+    plays = pear.play_by_play("B1-2026-00001")
+    assert list(plays["seq"]) == [1, 2] and plays.attrs["home"]["team"] == "A"
+    pear = client(FakeResponse(body={"team": "LSU", "season": 2026, "count": 2,
+                                     "games": [GAME, dict(GAME, game_id="S2-2026-00002")]}))
+    season = pear.team_games("LSU", 2026, sport="softball", division="d2")
+    assert pear.session.calls[0]["url"] == "http://api.test/v1/softball/d2/team/LSU/games/2026"
+    assert len(season["games"]) == 2 and len(season["plays"]) == 4 and season["games"].attrs["season"] == 2026
+    plays = pear.team_play_by_play("LSU")
+    assert pear.session.calls[-1]["url"] == "http://api.test/v1/baseball/d1/team/LSU/play-by-play"
+    assert set(plays["game_id"]) == {"S2-2026-00001", "S2-2026-00002"} and len(plays.attrs["games"]) == 2
