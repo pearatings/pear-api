@@ -14,6 +14,15 @@ class AuthenticationError(PearError):
     lapsed (HTTP 403)."""
 
 
+class TierError(PearError):
+    """The endpoint needs a higher tier than your key's (HTTP 403). `required_tier` is the lowest tier that reaches
+    it ("plus", "pro" or "max"); upgrade with `Pear().billing_portal()`."""
+
+    def __init__(self, message, status_code=None, required_tier=None):
+        super().__init__(message, status_code)
+        self.required_tier = required_tier
+
+
 class NotFoundError(PearError):
     """Unknown team, player, season or division, or no data for it yet (HTTP 404)."""
 

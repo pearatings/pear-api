@@ -96,5 +96,29 @@ def test_tournaments(pear):
         pear.tournament_outlook(division="naia")
 
 
+def test_parks_coaches_and_daily_ratings(pear):
+    frame(pear.park_factors(2025), 250)
+    frame(pear.twitter(division="d2"), 200)
+    frame(pear.cities(), 300)
+    frame(pear.coaches(), 1000)
+    assert len(frame(pear.head_coaches(2026, team="LSU"))) == 1
+    frame(pear.staffs(2026, team="LSU"))
+    day = frame(pear.daily_ratings("2024-04-15"), 290)
+    lsu = frame(pear.team_daily_ratings("LSU", 2024), 100)
+    assert day.attrs["date"] == "2024-04-15" and "power_rating" in lsu.columns
+
+
+def test_team_info_coaches_players(pear):
+    assert frame(pear.team_info(), 250)["color"].notna().all()
+    frame(pear.conference_ratings(2026), 20)
+    frame(pear.coach_tenures(team="LSU"), 2)
+    frame(pear.player_search("dawson park"))
+    frame(pear.returning(), 200)
+    frame(pear.portal(team="LSU"))
+    assert frame(pear.team_game_log("LSU", 2026), 50)["xR"].notna().sum() > 40
+    assert len(frame(pear.run_expectancy(2026), 24)) == 24
+
+
 def test_account(pear):
-    assert "plan" in pear.account()
+    account = pear.account()
+    assert "plan" in account and "includes" in account

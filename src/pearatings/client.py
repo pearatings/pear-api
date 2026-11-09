@@ -16,7 +16,7 @@ import requests
 
 from . import __version__
 from .errors import (APIError, AuthenticationError, InvalidRequestError, NotFoundError, PearError,
-                     RateLimitError)
+                     RateLimitError, TierError)
 
 DEFAULT_BASE_URL = "https://api.pearatings.com"
 DIVISIONS = {"baseball": ("d1", "d2", "d3", "naia"), "softball": ("d1", "d2", "d3")}
@@ -100,6 +100,7 @@ class Pear:
 
     Every method takes keyword-only `sport` ("baseball" | "softball", default "baseball") and `division`
     ("d1" | "d2" | "d3" | "naia", default "d1") unless it exists for one division only.
+    Methods marked with a tier (Plus, Pro, Max) need that tier or higher; on a lower tier they raise TierError.
     The API address comes from `base_url`, else the PEAR_API_URL environment variable, else
     https://api.pearatings.com.
     """
@@ -133,6 +134,9 @@ class Pear:
                 after = r.headers.get("Retry-After")
                 raise RateLimitError(f"429: {detail}", status_code=429,
                                      retry_after=int(after) if after and after.isdigit() else None)
+            tier = r.headers.get("X-Pear-Required-Tier")
+            if r.status_code == 403 and tier:
+                raise TierError(f"403: {detail}", status_code=403, required_tier=tier)
             raise _ERRORS.get(r.status_code, APIError)(f"{r.status_code}: {detail}", status_code=r.status_code)
         return r
 
@@ -161,8 +165,8 @@ class Pear:
     # ------------------------------------------------------------------ your account
 
     def account(self) -> dict:
-        """Your key's tier, its limits (calls per month and per minute), calls used this month (UTC; resets on the
-        1st) and subscription status."""
+        """Your key's tier, its limits (calls per month and per minute), what it `includes`, what each higher tier
+        adds (`upgrade_adds`), calls used this month (UTC; resets on the 1st) and subscription status."""
         return self.get("account")
 
     def billing_portal(self, open_browser: bool = True) -> str:
@@ -179,7 +183,8 @@ class Pear:
     def ratings(self, date: Optional[Date] = None, *, sport: str = "baseball", division: str = "d1") -> pd.DataFrame:
         """Every team's Team Strength Rating (TSR), PCR, RQI, SOS, SOR, WAB, quadrant records, RPI (with its SOS and
         quadrants), KPI, ELO, killshots and projected record. Current by default; pass a `date` ("2027-04-18" or a
-        date) for the ratings as they stood that day (current season only). attrs: date (of the ratings used)."""
+        date) for the ratings as they stood that day (current season only; Plus tier). attrs: date (of the ratings
+        used). Past seasons day by day: daily_ratings() (Max tier)."""
         if isinstance(date, _dt.date):
             date = date.isoformat()
         path = f"{self._div(sport, division)}/ratings" + (f"/{_seg(date)}" if date else "")
@@ -192,7 +197,8 @@ class Pear:
 
     def stats(self, season: Optional[int] = None, *, sport: str = "baseball", division: str = "d1") -> pd.DataFrame:
         """Every team's PEAR numbers for a season (default: current): ratings, resume, killshots, adjusted offense /
-        defense and staff values. For a finished season these are the end-of-season numbers.
+        defense, and (Pro tier) starter / reliever / weekend / midweek staff values. For a finished season these are
+        the end-of-season numbers.
         attrs: date, season, columnMetadata."""
         return _table(self.get(f"{self._div(sport, division)}/stats", season=season), "stats")
 
@@ -240,6 +246,55 @@ class Pear:
         """A conference's logo as PNG bytes."""
         return self._request("GET", f"conference-logo/{_seg(conference)}").content
 
+    def team_info(self, *, sport: str = "baseball", division: str = "d1") -> pd.DataFrame:
+        """Every team this season: conference, color and alt_color (hex), city and state (D1 baseball), twitter
+        (baseball) and `logo` (its API path; logo() fetches it)."""
+        return _table(self.get(f"{self._div(sport, division)}/team-info"), "teams")
+
+    def conference_ratings(self, season: Optional[int] = None, *, sport: str = "baseball",
+                           division: str = "d1") -> pd.DataFrame:
+        """Each conference's strength for a season (default: current; past seasons at the end), strongest first:
+        teams, avg_tsr, median_tsr, best_team and its TSR, best_pcr, rank. attrs: season, date."""
+        return _table(self.get(f"{self._div(sport, division)}/conference-ratings", season=season), "conferences")
+
+    def twitter(self, *, division: str = "d1") -> pd.DataFrame:
+        """Each baseball team's X (Twitter) account: team, twitter (the account's URL)."""
+        return _table(self.get(f"{self._div('baseball', division)}/twitter"), "teams")
+
+    def cities(self) -> pd.DataFrame:
+        """D1 baseball: each team's city and state."""
+        return _table(self.get("baseball/d1/cities"), "teams")
+
+    def park_factors(self, season: Optional[int] = None, *, sport: str = "baseball",
+                     division: str = "d1") -> pd.DataFrame:
+        """Each home park's effect by season (default: every season): `venue` (the home team), `park` (runs per plate
+        appearance it adds or takes away against a neutral park, from that season's play-by-play), `pa` (the plate
+        appearances behind it). Not NAIA. Plus tier."""
+        return _table(self.get(f"{self._div(sport, division)}/park-factors", season=season), "parks")
+
+    # ------------------------------------------------------------------ coaches (D1 baseball)
+
+    def coaches(self) -> pd.DataFrame:
+        """Every D1 baseball coach on a staff since 2014, by permanent `coach_id`: name, first and last season on a
+        D1 staff, `teams` (a list). Plus tier."""
+        return _table(self.get("baseball/d1/coaches"), "coaches")
+
+    def head_coaches(self, season: Optional[int] = None, *, team: Optional[str] = None) -> pd.DataFrame:
+        """The head coach of every D1 baseball team-season since 2014 (season, team, coach_id, coach) with the
+        team's W, L and final tsr_rank; filter by `season` and / or `team`. Plus tier."""
+        return _table(self.get("baseball/d1/head-coaches", season=season, team=team), "head_coaches")
+
+    def coach_tenures(self, coach_id: Optional[str] = None, *, team: Optional[str] = None) -> pd.DataFrame:
+        """D1 baseball head coaching tenures: coach, team, first_season (first_season_known false when it began
+        before 2014 and the start isn't known), last_season, and over the seasons from 2014: seasons, wins,
+        losses, best_tsr_rank; `current`. Filter by `coach_id` and / or `team`. Plus tier."""
+        return _table(self.get("baseball/d1/coach-tenures", coach_id=coach_id, team=team), "tenures")
+
+    def staffs(self, season: Optional[int] = None, *, team: Optional[str] = None) -> pd.DataFrame:
+        """Every D1 baseball coaching staff for a season (default: current): team, coach_id, name, title, role
+        (head, pitching, hitting, assistant, volunteer, staff). attrs: season. Plus tier."""
+        return _table(self.get("baseball/d1/staffs", season=season, team=team), "staffs")
+
     # ------------------------------------------------------------------ projections
 
     def games(self, date: Optional[Date] = None, *, team: Optional[str] = None, conference: Optional[str] = None,
@@ -253,6 +308,12 @@ class Pear:
             season = int(date[:4])
         return _table(self.get(f"{self._div(sport, division)}/games", date=date, team=team, conference=conference,
                                season=season), "games")
+
+    def schedule(self, season: Optional[int] = None, *, sport: str = "baseball", division: str = "d1") -> pd.DataFrame:
+        """Every game of a season (default: current) in one call, oldest first: game_id (not NAIA), Date, Time,
+        home_team, away_team, neutral, scores once played, PEAR's line (Spread, PEAR), home_win_prob, GQI,
+        is_conference_game, hits and errors. attrs: season, count. Plus tier."""
+        return _table(self.get(f"{self._div(sport, division)}/schedule", season=season), "games")
 
     def matchup(self, away: str, home: str, *, neutral: bool = False, season: Optional[int] = None,
                 sport: str = "baseball", division: str = "d1") -> dict:
@@ -270,14 +331,14 @@ class Pear:
     def simulate_wins(self, team: str, *, rating: Optional[float] = None, num_simulations: Optional[int] = None,
                       conference_only: bool = False, sport: str = "baseball", division: str = "d1") -> dict:
         """Simulate the rest of a team's season: expected_wins, min/max, and the `distribution` of final win
-        totals. Pass `rating` to see the effect of a different team rating."""
+        totals. Pass `rating` to see the effect of a different team rating. Pro tier."""
         return _frames(self.post(f"{self._div(sport, division)}/simulate-wins",
                                  {"team_name": team, "rating": rating, "num_simulations": num_simulations,
                                   "conference_only": conference_only}))
 
     def season_projection(self, *, sport: str = "baseball", division: str = "d1") -> dict:
         """The whole projected season: `projected_pcr` (final PCR projection), `tournament_outlook` (projected
-        field) and `team_simulated_results` ({team: projected games})."""
+        field) and `team_simulated_results` ({team: projected games}). Pro tier."""
         return _frames(self.get(f"{self._div(sport, division)}/season-projection"))
 
     def conference_projections(self, *, sport: str = "baseball", division: str = "d1") -> pd.DataFrame:
@@ -296,7 +357,7 @@ class Pear:
         """Player leaderboard for a season: `side` "hitting" or "pitching", sorted by `sort` (a stat column;
         default PRV) in `order` ("asc" | "desc"). Filters: `conferences`, `positions` (hitting: C, IF, OF, UT,
         DH), `search` (player or team name). Returns every matching player unless you set `limit`.
-        attrs: total, season, side, sort, and the filter values."""
+        attrs: total, season, side, sort, and the filter values. Plus tier."""
         path = f"{self._div(sport, division)}/players"
         params = {"season": season, "side": side, "sort": sort, "order": order, "conferences": _csv(conferences),
                   "pos": _csv(positions), "q": search}
@@ -315,12 +376,32 @@ class Pear:
                division: str = "d1") -> pd.DataFrame:
         """A team's players for a season with their season stats (hitting, pitching `p_*`, fielding `f_*`) and
         roster details. Before a season starts: next season's roster with each player's status.
-        attrs: team, season, platform (where the stats came from), returning."""
+        attrs: team, season, platform (where the stats came from), returning. Plus tier."""
         return _table(self.get(f"{self._div(sport, division)}/roster", team=team, season=season), "players")
+
+    def player_search(self, name: str, *, sport: str = "baseball") -> pd.DataFrame:
+        """Players (any season, any division) whose name contains every word of `name`, newest first, up to 100:
+        player_id (for player()), name, position, bats_throws, last_team, last_season. attrs: total. Plus tier."""
+        if sport not in DIVISIONS:
+            raise ValueError(f"Unknown sport {sport}")
+        return _table(self.get(f"{sport}/players/search", q=name), "players")
+
+    def returning(self, season: Optional[int] = None) -> pd.DataFrame:
+        """D1 baseball: each team's returning production for the coming season (default: current), from its
+        roster: player counts by status, last season's hitting / pitching runs above average of the players it has
+        (hit_raa, pitch_raa; _ret returners, _tr transfers), the share of at-bats / innings returning (ret_ab,
+        ret_ip) or added (added_ab, added_ip), and ranks. attrs: season. Plus tier."""
+        return _table(self.get("baseball/d1/returning", season=season), "teams")
+
+    def portal(self, season: Optional[int] = None, *, team: Optional[str] = None) -> pd.DataFrame:
+        """D1 baseball: every player on a new team's roster for the coming season, status "transfer" (from another
+        D1 team: last_team, last_season) or "outside_d1" (previous_school), with last D1 season PA / PRV and
+        pitching outs / PRV (p_). Filter by the new `team`. attrs: season. Plus tier."""
+        return _table(self.get("baseball/d1/portal", season=season, team=team), "players")
 
     def player(self, player_id: str, *, sport: str = "baseball") -> dict:
         """One player by id (the `player_id` column of `roster` / `players`): bio, `seasons` (season lines) and
-        `games` (game-by-game lines)."""
+        `games` (game-by-game lines). Plus tier."""
         if sport not in DIVISIONS:
             raise ValueError(f"Unknown sport {sport}")
         return _frames(self.get(f"{sport}/player/{_seg(player_id)}"))
@@ -330,17 +411,18 @@ class Pear:
     def box_score(self, game_id: str) -> dict:
         """One game's box score by PEAR game id (the `game_id` column of games() / team_schedule()): `game` (date,
         teams, score, hits, errors, line score, expected runs) and DataFrames `batting`, `pitching` (both teams;
-        `side` says which) and `teams` (team lines). Sport and division come from the id."""
+        `side` says which) and `teams` (team lines). Sport and division come from the id. Pro tier."""
         return self._game(game_id, "box-score")
 
     def play_by_play(self, game_id: str) -> pd.DataFrame:
         """One game's plays, in order: the play, batter, pitcher, base-out state before and after, home win
-        probability after it. attrs: the game (date, teams, score, pregame win probability, Excitement Index)."""
+        probability after it. attrs: the game (date, teams, score, pregame win probability, Excitement Index).
+        Pro tier."""
         data = self.get(f"{_game_path(game_id)}/play-by-play/{_seg(game_id)}")
         return _table(data, "plays")
 
     def game(self, game_id: str) -> dict:
-        """One game, everything: box_score() plus `plays` (play_by_play())."""
+        """One game, everything: box_score() plus `plays` (play_by_play()). Pro tier."""
         return self._game(game_id, "game")
 
     def _game(self, game_id: str, endpoint: str) -> dict:
@@ -351,13 +433,13 @@ class Pear:
     def team_box_scores(self, team: str, season: Optional[int] = None, *, sport: str = "baseball",
                         division: str = "d1") -> Dict[str, pd.DataFrame]:
         """Every box score of a team's season (default: current) in one call, stacked into DataFrames tagged with
-        `game_id`: `games` (one row per game), `batting`, `pitching`, `teams` (team lines)."""
+        `game_id`: `games` (one row per game), `batting`, `pitching`, `teams` (team lines). Pro tier."""
         return self._team_games(team, season, "box-scores", sport, division)
 
     def team_play_by_play(self, team: str, season: Optional[int] = None, *, sport: str = "baseball",
                           division: str = "d1") -> pd.DataFrame:
         """Every play of a team's season (default: current) in one call, one row per play tagged with `game_id`.
-        attrs: team, season, games (one record per game: date, teams, score)."""
+        attrs: team, season, games (one record per game: date, teams, score). Pro tier."""
         tables = self._team_games(team, season, "play-by-play", sport, division)
         plays = tables.get("plays", pd.DataFrame())
         plays.attrs = {"team": team, "season": tables["games"].attrs.get("season"),
@@ -366,8 +448,21 @@ class Pear:
 
     def team_games(self, team: str, season: Optional[int] = None, *, sport: str = "baseball",
                    division: str = "d1") -> Dict[str, pd.DataFrame]:
-        """team_box_scores() plus `plays`: every game of a team's season, everything, in one call."""
+        """team_box_scores() plus `plays`: every game of a team's season, everything, in one call. Pro tier."""
         return self._team_games(team, season, "games", sport, division)
+
+    def team_game_log(self, team: str, season: Optional[int] = None, *, sport: str = "baseball",
+                      division: str = "d1") -> pd.DataFrame:
+        """A team's season game by game (default: current): opponent, venue, result, runs, opp_runs, pregame
+        win_prob, PEAR's line, GQI, and from play-by-play xR, opp_xR, win_exp (postgame win expectancy) and
+        excitement. attrs: team, season. Pro tier."""
+        return _table(self.get(f"{self._div(sport, division)}/team/{_seg(team)}/game-log", season=season), "games")
+
+    def run_expectancy(self, season: Optional[int] = None, *, sport: str = "baseball",
+                       division: str = "d1") -> pd.DataFrame:
+        """A season's run expectancy matrix (default: newest): bases ("100" = runner on first), outs, re (expected
+        runs to the end of the inning), plays. Not NAIA. attrs: season. Pro tier."""
+        return _table(self.get(f"{self._div(sport, division)}/run-expectancy", season=season), "matrix")
 
     def _team_games(self, team, season, endpoint, sport, division) -> Dict[str, pd.DataFrame]:
         path = f"{self._div(sport, division)}/team/{_seg(team)}/{endpoint}" + (f"/{int(season)}" if season else "")
@@ -390,15 +485,29 @@ class Pear:
         """D1 baseball: every team's end-of-season numbers for every season since 1999."""
         return _table(self.get("baseball/d1/historical-table"), "data")
 
+    def daily_ratings(self, date: Date) -> pd.DataFrame:
+        """D1 baseball: every team's TSR (`power_rating`), RQI and `resume_quality`, SOS, RemSOS, PCR and
+        `pcr_score` as they stood on `date`, any day of a finished season since 2016 (no 2020), on the current
+        rating (RQI, SOS, RemSOS, PCR are ranks). A day counts every game before it; a day after no games gives the
+        newest earlier day. attrs: date (of the numbers used), season. Max tier."""
+        if isinstance(date, _dt.date):
+            date = date.isoformat()
+        return _table(self.get(f"baseball/d1/daily-ratings/{_seg(date)}"), "teams")
+
+    def team_daily_ratings(self, team: str, season: int) -> pd.DataFrame:
+        """D1 baseball: one team's finished season day by day, oldest first, with daily_ratings()'s columns and
+        `date`. attrs: team, season. Max tier."""
+        return _table(self.get(f"baseball/d1/team/{_seg(team)}/daily-ratings", season=season), "days")
+
     # ------------------------------------------------------------------ lookup
 
     def lookup_options(self, *, sport: str = "baseball", division: str = "d1") -> dict:
-        """What Lookup can search: `seasons`, `fields` by kind (game, team, bat, pit) and `scopes`."""
+        """What Lookup can search: `seasons`, `fields` by kind (game, team, bat, pit) and `scopes`. Pro tier."""
         return _frames(self.get(f"{self._div(sport, division)}/lookup-options"))
 
     def lookup_fields(self, *, sport: str = "baseball", division: str = "d1") -> pd.DataFrame:
         """Every Lookup field in one table: kind (game | team | bat | pit), key (what a condition's `field`
-        takes), label, group, unit."""
+        takes), label, group, unit. Pro tier."""
         fields = self.get(f"{self._div(sport, division)}/lookup-options")["fields"]
         return _records([dict(f, kind=kind) for kind, rows in fields.items() for f in rows])
 
@@ -413,7 +522,7 @@ class Pear:
             {"kind": "player", "field": "HR", "op": ">=", "value": 3}                     # mode="players"
         `op` is ">=", "<=" or "="; `field` is a key from lookup_fields(); team conditions need a `scope`
         (either, both, total, winner, loser, home, away, team, opp). `team` limits the search to teams whose
-        name contains it. Up to 200 rows per call; page with `offset`. attrs: total, columns."""
+        name contains it. Up to 200 rows per call; page with `offset`. attrs: total, columns. Pro tier."""
         return _table(self.post(f"{self._div(sport, division)}/lookup", {
             "mode": mode, "role": role, "season_from": season_from, "season_to": season_to or season_from,
             "conditions": conditions or [], "match": match, "team": team, "sort": sort, "desc": desc,
@@ -423,17 +532,17 @@ class Pear:
 
     def tournament_outlook(self, *, sport: str = "baseball", division: str = "d1") -> dict:
         """The projected national tournament field (the actual bracket once it is set): regionals (D2:
-        regions), bubble lists, automatic qualifiers, multi-bid conferences, team ratings."""
+        regions), bubble lists, automatic qualifiers, multi-bid conferences, team ratings. Plus tier."""
         return _frames(self.get(f"{self._div(sport, division)}/tournament/outlook"))
 
     def tournament_regionals(self, season: Optional[int] = None) -> dict:
         """D1 baseball, once the tournament starts (default: current season): regionals, every regional / super
-        regional / CWS game with its projection or result, regional winners, the CWS bracket."""
+        regional / CWS game with its projection or result, regional winners, the CWS bracket. Plus tier."""
         return _frames(self.get("baseball/d1/tournament/regionals", season=season))
 
     def tournament_team(self, team: str, *, sport: str = "baseball", division: str = "d1") -> dict:
         """One tournament team's numbers: rating and rank, PCR, record, Q1 record, regional win probability
-        (D1 baseball, D1 softball, D3 baseball)."""
+        (D1 baseball, D1 softball, D3 baseball). Plus tier."""
         path = self._only(("baseball/d1", "softball/d1", "baseball/d3"), sport, division)
         return self.get(f"{path}/tournament/team", team=team)
 
@@ -441,7 +550,7 @@ class Pear:
                          sport: str = "baseball", division: str = "d1") -> dict:
         """Simulate the national tournament once: regional winners through the champion. D1 baseball, D1
         softball and D3 baseball use `outlook` (from tournament_outlook(); fetched when omitted); D2 baseball
-        needs no outlook. Same `seed` = same result."""
+        needs no outlook. Same `seed` = same result. Pro tier."""
         path = self._only(("baseball/d1", "softball/d1", "baseball/d3", "baseball/d2"), sport, division)
         if path == "baseball/d2":
             body = {"seed": seed}
@@ -454,27 +563,27 @@ class Pear:
         return _frames(self.post(f"{path}/tournament/simulate-bracket", body))
 
     def d2_simulate_cary(self, teams: List[str], *, seed: Optional[int] = None) -> dict:
-        """D2 baseball: simulate the 8-team finals in Cary from the 8 regional winners, best PCR first."""
+        """D2 baseball: simulate the 8-team finals in Cary from the 8 regional winners, best PCR first. Pro tier."""
         return _frames(self.post("baseball/d2/tournament/simulate-cary", {"teams": teams, "seed": seed}))
 
     def naia_simulate_regional(self, seeds: List[str], *, format: str = "5team", seed: Optional[int] = None) -> dict:
-        """NAIA: simulate one opening-round regional (`format` "4team" or "5team", seeds in order)."""
+        """NAIA: simulate one opening-round regional (`format` "4team" or "5team", seeds in order). Pro tier."""
         return _frames(self.post("baseball/naia/tournament/simulate-regional",
                                  {"seeds": seeds, "format": format, "seed": seed}))
 
     def naia_simulate_ws(self, teams: Optional[List[str]] = None, *, regional_picks: Optional[dict] = None,
                          seed: Optional[int] = None, n: Optional[int] = None) -> dict:
-        """NAIA: simulate the World Series. With no `teams`, one winner per regional is drawn first."""
+        """NAIA: simulate the World Series. With no `teams`, one winner per regional is drawn first. Pro tier."""
         return _frames(self.post("baseball/naia/tournament/simulate-ws",
                                  {"teams": teams or [], "regional_picks": regional_picks or {}, "seed": seed, "n": n}))
 
     def naia_ws_odds(self, teams: List[str]) -> dict:
-        """NAIA: each team's chance to win the World Series from its 10 seeds (exact, not simulated)."""
+        """NAIA: each team's chance to win the World Series from its 10 seeds (exact, not simulated). Pro tier."""
         return _frames(self.post("baseball/naia/tournament/ws-champion-odds", {"teams": teams}))
 
     def conference_tournament_probs(self, conference: str, *, locked_matchups: Optional[List[dict]] = None) -> dict:
         """D1 baseball: each team's chance to reach every round of its conference tournament and win it.
-        `locked_matchups` fixes results already decided: [{"winner": "LSU", "loser": "Florida"}, ...]."""
+        `locked_matchups` fixes results already decided: [{"winner": "LSU", "loser": "Florida"}, ...]. Pro tier."""
         if locked_matchups:
             return _frames(self.post("baseball/d1/conference-tournament/probs-with-picks",
                                      {"conference": conference, "locked_matchups": locked_matchups}))

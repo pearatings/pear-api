@@ -4,7 +4,7 @@ import json
 import pandas as pd
 import pytest
 
-from pearatings import AuthenticationError, NotFoundError, Pear, RateLimitError
+from pearatings import AuthenticationError, NotFoundError, Pear, RateLimitError, TierError
 
 
 class FakeResponse:
@@ -165,3 +165,57 @@ def test_play_by_play_and_team_season():
     plays = pear.team_play_by_play("LSU")
     assert pear.session.calls[-1]["url"] == "http://api.test/v1/baseball/d1/team/LSU/play-by-play"
     assert set(plays["game_id"]) == {"S2-2026-00001", "S2-2026-00002"} and len(plays.attrs["games"]) == 2
+
+
+def test_tier_error_names_the_tier():
+    resp = FakeResponse(status=403, body={"detail": "This endpoint needs the Pro tier or higher; this key is on Free."})
+    resp.headers = {"X-Pear-Required-Tier": "pro"}
+    with pytest.raises(TierError) as e:
+        client(resp).lookup(2026)
+    assert e.value.required_tier == "pro" and e.value.status_code == 403 and "Pro tier" in str(e.value)
+    with pytest.raises(AuthenticationError):   # a lapsed or revoked key: no tier header
+        client(FakeResponse(status=403, body={"detail": "not active"})).ratings()
+
+
+def test_parks_coaches_and_daily_ratings_urls():
+    import datetime as dt
+    pear = client(FakeResponse(body={"teams": [{"Team": "LSU"}], "parks": [], "coaches": [], "head_coaches": [],
+                                     "staffs": [], "days": [], "date": "2024-04-15", "season": 2024}))
+    pear.park_factors(2025, sport="softball", division="d2")
+    pear.twitter(division="naia")
+    pear.cities()
+    pear.schedule(2026, division="d3")
+    pear.coaches()
+    pear.head_coaches(2026, team="LSU")
+    pear.staffs(team="Texas A&M")
+    df = pear.daily_ratings(dt.date(2024, 4, 15))
+    pear.team_daily_ratings("Texas A&M", 2024)
+    calls = [(c["url"].removeprefix("http://api.test/v1/"), c["params"]) for c in pear.session.calls]
+    assert calls == [("softball/d2/park-factors", {"season": 2025}), ("baseball/naia/twitter", {}),
+                     ("baseball/d1/cities", {}), ("baseball/d3/schedule", {"season": 2026}),
+                     ("baseball/d1/coaches", {}),
+                     ("baseball/d1/head-coaches", {"season": 2026, "team": "LSU"}),
+                     ("baseball/d1/staffs", {"team": "Texas A&M"}), ("baseball/d1/daily-ratings/2024-04-15", {}),
+                     ("baseball/d1/team/Texas%20A%26M/daily-ratings", {"season": 2024})]
+    assert df.loc[0, "Team"] == "LSU" and df.attrs["date"] == "2024-04-15"
+    with pytest.raises(ValueError):
+        pear.twitter(division="d4")
+
+
+def test_more_endpoints_urls():
+    pear = client(FakeResponse(body={"teams": [], "conferences": [], "games": [], "tenures": [], "players": [],
+                                     "matrix": []}))
+    pear.team_info(sport="softball", division="d3")
+    pear.conference_ratings(2025)
+    pear.coach_tenures("C000001")
+    pear.player_search("dawson park", sport="softball")
+    pear.returning()
+    pear.portal(team="LSU")
+    pear.team_game_log("LSU", 2026)
+    pear.run_expectancy(2026, division="d2")
+    calls = [(c["url"].removeprefix("http://api.test/v1/"), c["params"]) for c in pear.session.calls]
+    assert calls == [("softball/d3/team-info", {}), ("baseball/d1/conference-ratings", {"season": 2025}),
+                     ("baseball/d1/coach-tenures", {"coach_id": "C000001"}),
+                     ("softball/players/search", {"q": "dawson park"}), ("baseball/d1/returning", {}),
+                     ("baseball/d1/portal", {"team": "LSU"}), ("baseball/d1/team/LSU/game-log", {"season": 2026}),
+                     ("baseball/d2/run-expectancy", {"season": 2026})]
