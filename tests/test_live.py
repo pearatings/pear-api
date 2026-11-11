@@ -32,6 +32,7 @@ def test_teams_and_ratings(pear):
         pear.preseason(1990)
     frame(pear.stats(2026), 250)
     frame(pear.stats(2026, sport="baseball", division="naia"))
+    frame(pear.team_stats(2026), 250)
     teams = pear.teams()
     assert "LSU" in teams
     assert isinstance(pear.team("LSU")["team"], dict)

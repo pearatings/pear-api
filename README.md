@@ -16,8 +16,8 @@ Pick a tier at **https://api.pearatings.com/billing**. Your key is shown once: c
 
 | Tier | Price | API calls per month | Per minute | Adds |
 |---|---|---|---|---|
-| Free | $0 | 1,000 | 10 | Current ratings, preseason ratings and PEAR team numbers for every season (TSR, PCR, RQI, SOS, AdjO / AdjD, ...); teams, conferences, standings, records, PCR ranks; games and PEAR's lines for any date, matchups, team schedules; conference projections and conference strength; team and tournament history, the D1 historical table; team info (conference, colors, city, X account, logos) |
-| Plus | $4.99/month | 10,000 | 60 | Everything in Free, plus ratings on any day of the current season; a whole season's games in one call; player leaderboards, rosters, player pages; tournament outlook, regionals, tournament team detail; player search; D1 baseball coaches with records and tenures; D1 returning production and transfers; park factors |
+| Free | $0 | 1,000 | 10 | Current ratings, preseason ratings and PEAR team numbers for every season (TSR, PCR, RQI, SOS, AdjO / AdjD, ...); teams, conferences, standings, records, PCR ranks; games and PEAR's lines for any date, a whole season's games in one call, matchups, team schedules; team stats from NCAA.com (2008 on); conference projections and conference strength; team and tournament history, the D1 historical table; team info (conference, colors, city, X account, logos) |
+| Plus | $4.99/month | 10,000 | 60 | Everything in Free, plus ratings on any day of the current season; player leaderboards, rosters, player pages; tournament outlook, regionals, tournament team detail; player search; D1 baseball coaches with records and tenures; D1 returning production and transfers; park factors |
 | Pro | $9.99/month | 25,000 | 120 | Everything in Plus, plus box scores and play-by-play (single games or a team's whole season, with in-game win probability and postgame win expectancy); starter, reliever, weekend and midweek staff values; team game logs (xR, win expectancy, Excitement); run expectancy tables; Lookup; simulations (rest-of-season wins, season projection, brackets, conference tournaments) |
 | Max | $19.99/month | 75,000 | 120 | Everything in Pro, plus D1 baseball ratings day by day for every finished season since 2016 (TSR, RQI, SOS, RemSOS, PCR) |
 
@@ -48,9 +48,10 @@ pear.ratings(sport="softball", division="d2")
 
 pear.preseason(2027)                                   # preseason ratings
 pear.stats(2025)                                       # PEAR team numbers, end of season 2025
+pear.team_stats(2025)                                  # NCAA.com team stats (AB, H, ERA, ...), end of season 2025
 
 pear.games("2026-04-18")                               # that day's games with PEAR's line and win probability
-pear.schedule(2026)                                    # every game of the season in one call (Plus)
+pear.schedule(2026)                                    # every game of the season in one call
 pear.matchup("LSU", "Florida", neutral=True)           # any two teams
 pear.team_schedule("LSU", 2026)["schedule"]            # every game of a team's season
 
@@ -97,7 +98,7 @@ method's details.
 | Area | Methods |
 |---|---|
 | Your account | `account`, `billing_portal` |
-| Teams and ratings | `ratings`, `preseason`, `stats`, `teams`, `team`, `team_info`, `team_conferences`, `conferences`, `conference_standings`, `conference_ratings`, `records`, `pcr_ranks`, `combined_ratings`, `logo`, `conference_logo`, `twitter`, `cities`, `park_factors` |
+| Teams and ratings | `ratings`, `preseason`, `stats`, `team_stats`, `teams`, `team`, `team_info`, `team_conferences`, `conferences`, `conference_standings`, `conference_ratings`, `records`, `pcr_ranks`, `combined_ratings`, `logo`, `conference_logo`, `twitter`, `cities`, `park_factors` |
 | Coaches (D1 baseball) | `coaches`, `head_coaches`, `coach_tenures`, `staffs` |
 | Projections | `games`, `schedule`, `matchup`, `team_schedule`, `simulate_wins`, `season_projection`, `conference_projections` |
 | Players | `players`, `roster`, `player`, `player_search`, `returning`, `portal` |

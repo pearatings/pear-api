@@ -185,6 +185,7 @@ def test_parks_coaches_and_daily_ratings_urls():
     pear.twitter(division="naia")
     pear.cities()
     pear.schedule(2026, division="d3")
+    pear.team_stats(2025, sport="softball")
     pear.coaches()
     pear.head_coaches(2026, team="LSU")
     pear.staffs(team="Texas A&M")
@@ -193,7 +194,7 @@ def test_parks_coaches_and_daily_ratings_urls():
     calls = [(c["url"].removeprefix("http://api.test/v1/"), c["params"]) for c in pear.session.calls]
     assert calls == [("softball/d2/park-factors", {"season": 2025}), ("baseball/naia/twitter", {}),
                      ("baseball/d1/cities", {}), ("baseball/d3/schedule", {"season": 2026}),
-                     ("baseball/d1/coaches", {}),
+                     ("softball/d1/team-stats", {"season": 2025}), ("baseball/d1/coaches", {}),
                      ("baseball/d1/head-coaches", {"season": 2026, "team": "LSU"}),
                      ("baseball/d1/staffs", {"team": "Texas A&M"}), ("baseball/d1/daily-ratings/2024-04-15", {}),
                      ("baseball/d1/team/Texas%20A%26M/daily-ratings", {"season": 2024})]

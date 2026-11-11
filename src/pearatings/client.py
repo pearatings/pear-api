@@ -202,6 +202,15 @@ class Pear:
         attrs: date, season."""
         return _table(self.get(f"{self._div(sport, division)}/stats", season=season), "stats")
 
+    def team_stats(self, season: Optional[int] = None, *, sport: str = "baseball",
+                   division: str = "d1") -> pd.DataFrame:
+        """Every team's season stats as NCAA.com shows them (NAIA: its stats site), 2008 on (default: current; a
+        finished season's are its final stats): G, AB, H, BA, TB, SLG, OBP, HBP, RS (runs scored), BB, IP, RA (runs
+        allowed), ER, ERA, WHIP, KP9 / KP7 (strikeouts per 9 / 7 innings), WP9 (walks per 9), K/BB, PO, A, E, PCT
+        (fielding), and HR, 2B, 3B, SF, SH (sacrifice bunts), SO, HA, HB, PBB (hits, hit batters, walks allowed) where
+        the source has them. PEAR's own team numbers (wOBA, FIP, ...) are in stats(). attrs: date, season, count."""
+        return _table(self.get(f"{self._div(sport, division)}/team-stats", season=season), "teams")
+
     def teams(self, season: Optional[int] = None, *, sport: str = "baseball", division: str = "d1") -> List[str]:
         """Team names, in the exact spelling every other method expects."""
         return self.get(f"{self._div(sport, division)}/teams", season=season)["teams"]
@@ -312,7 +321,7 @@ class Pear:
     def schedule(self, season: Optional[int] = None, *, sport: str = "baseball", division: str = "d1") -> pd.DataFrame:
         """Every game of a season (default: current) in one call, oldest first: game_id (not NAIA), Date, Time,
         home_team, away_team, neutral, scores once played, PEAR's line (Spread, PEAR), home_win_prob, GQI,
-        is_conference_game, hits and errors. attrs: season, count. Plus tier."""
+        is_conference_game, hits and errors. attrs: season, count."""
         return _table(self.get(f"{self._div(sport, division)}/schedule", season=season), "games")
 
     def matchup(self, away: str, home: str, *, neutral: bool = False, season: Optional[int] = None,

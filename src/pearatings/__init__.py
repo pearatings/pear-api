@@ -4,7 +4,7 @@
     pear = Pear()                      # reads PEAR_API_KEY
     pear.ratings()                     # D1 baseball ratings as a DataFrame
 """
-__version__ = "1.0.1"
+__version__ = "1.1.0"
 
 from .client import Pear  # noqa: E402
 from .errors import (APIError, AuthenticationError, InvalidRequestError, NotFoundError, PearError,  # noqa: E402
