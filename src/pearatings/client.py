@@ -182,7 +182,7 @@ class Pear:
 
     def ratings(self, date: Optional[Date] = None, *, sport: str = "baseball", division: str = "d1") -> pd.DataFrame:
         """Every team's Team Strength Rating (TSR), PCR, RQI, SOS, SOR, WAB, quadrant records, RPI (with its SOS and
-        quadrants), KPI, ELO, killshots and projected record. Current by default; pass a `date` ("2027-04-18" or a
+        quadrants), KPI, killshots and projected record. Current by default; pass a `date` ("2027-04-18" or a
         date) for the ratings as they stood that day (current season only; Plus tier). attrs: date (of the ratings
         used). Past seasons day by day: daily_ratings() (Max tier)."""
         if isinstance(date, _dt.date):
@@ -199,7 +199,7 @@ class Pear:
         """Every team's PEAR numbers for a season (default: current): ratings, resume, killshots, adjusted offense /
         defense, and (Pro tier) starter / reliever / weekend / midweek staff values. For a finished season these are
         the end-of-season numbers.
-        attrs: date, season, columnMetadata."""
+        attrs: date, season."""
         return _table(self.get(f"{self._div(sport, division)}/stats", season=season), "stats")
 
     def teams(self, season: Optional[int] = None, *, sport: str = "baseball", division: str = "d1") -> List[str]:
@@ -301,7 +301,7 @@ class Pear:
               season: Optional[int] = None, sport: str = "baseball", division: str = "d1") -> pd.DataFrame:
         """Games on a date (default: today, or the next day with games) with PEAR's line, win probability and
         game quality (GQI); final scores once played. Filter by `team` or `conference`. `season` defaults to the
-        date's year. attrs: date, count, min_date, max_date (the season's first and last game dates)."""
+        date's year. attrs: date, count."""
         if isinstance(date, _dt.date):
             date = date.isoformat()
         if date and season is None:
@@ -324,8 +324,7 @@ class Pear:
 
     def team_schedule(self, team: str, season: Optional[int] = None, *, sport: str = "baseball",
                       division: str = "d1") -> dict:
-        """A team's full season: `schedule` (every game with its projection or result), `metrics` (ranks),
-        `resume_path` (D1 baseball), `head_coach`, `data_date`."""
+        """A team's full season: `schedule` (every game with its projection or result), `team_name`, `data_date`."""
         return _frames(self.post(f"{self._div(sport, division)}/team-schedule", {"team_name": team, "season": season}))
 
     def simulate_wins(self, team: str, *, rating: Optional[float] = None, num_simulations: Optional[int] = None,
@@ -376,7 +375,7 @@ class Pear:
                division: str = "d1") -> pd.DataFrame:
         """A team's players for a season with their season stats (hitting, pitching `p_*`, fielding `f_*`) and
         roster details. Before a season starts: next season's roster with each player's status.
-        attrs: team, season, platform (where the stats came from), returning. Plus tier."""
+        attrs: team, season, returning. Plus tier."""
         return _table(self.get(f"{self._div(sport, division)}/roster", team=team, season=season), "players")
 
     def player_search(self, name: str, *, sport: str = "baseball") -> pd.DataFrame:
